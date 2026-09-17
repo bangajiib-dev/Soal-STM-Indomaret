@@ -1,0 +1,6 @@
+{
+  "name": "Ujian Meeting STM Indomaret",
+  "description": "Aplikasi ujian online Meeting STM Indomaret terintegrasi Google Spreadsheet untuk login peserta, pengerjaan soal, rekap hasil, leaderboard juara, dan dashboard admin.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
