@@ -27,6 +27,9 @@ import {
   getCachedQuestions,
   getCachedResults,
   saveCachedQuestions,
+  saveCachedResults,
+  clearCachedResults,
+  clearAllResultsFromSheet,
 } from './lib/sheetsService';
 import { AlertCircle, CheckCircle2, FileSpreadsheet, Lock, Smartphone } from 'lucide-react';
 
@@ -40,6 +43,7 @@ export default function App() {
   const [currentParticipant, setCurrentParticipant] = useState<Participant | null>(null);
   const [isExamActive, setIsExamActive] = useState<boolean>(false);
   const [activeResult, setActiveResult] = useState<ExamResult | null>(null);
+  const [resultDeliveredToSheet, setResultDeliveredToSheet] = useState<boolean>(false);
 
   // App Data
   const [dataPeserta, setDataPeserta] = useState<Participant[]>(getCachedDataPeserta());
@@ -92,9 +96,9 @@ export default function App() {
         setQuestions(fetchedQuestions);
         saveCachedQuestions(fetchedQuestions);
       }
-      if (fetchedResults.length > 0) {
-        setResults(fetchedResults);
-      }
+      // Hasil_Jawaban always reflects the exact spreadsheet state (including 0 / empty)
+      setResults(fetchedResults);
+      saveCachedResults(fetchedResults);
 
       // Merge Data_Peserta (Toko & Jabatan) and Data_Login (NIK, Nama & Password)
       const mergedMap = new Map<string, Participant>();
@@ -184,12 +188,27 @@ export default function App() {
       }
     } catch (error: any) {
       console.error('Sign-in failed', error);
+      const isDomainError =
+        error.code === 'auth/unauthorized-domain' ||
+        error.message?.includes('unauthorized-domain') ||
+        error.message?.includes('Authorized Domains');
+      
+      const errorMessage = isDomainError
+        ? `Domain "${window.location.hostname}" belum diizinkan di Firebase Authentication. Tambahkan domain ini ke Authorized Domains di Firebase Console.`
+        : error.message || 'Gagal menghubungkan akun Google';
+
       setSyncStatus((prev) => ({
         ...prev,
         isLoading: false,
-        error: error.message,
+        error: errorMessage,
       }));
-      showToast(error.message || 'Gagal menghubungkan akun Google', 'error');
+
+      showToast(
+        isDomainError
+          ? 'Domain belum diizinkan di Firebase. Lihat panduan di tab Status Google Spreadsheet.'
+          : errorMessage,
+        'error'
+      );
     }
   };
 
@@ -201,14 +220,19 @@ export default function App() {
   };
 
   // Exam completion callback
-  const handleFinishExam = (result: ExamResult) => {
+  const handleFinishExam = (result: ExamResult, deliveredToSheet: boolean = false) => {
     setIsExamActive(false);
     setActiveResult(result);
+    setResultDeliveredToSheet(deliveredToSheet);
     setResults((prev) => {
       const filtered = prev.filter((r) => r.nik !== result.nik);
       return [result, ...filtered];
     });
-    showToast('Jawaban Anda berhasil dikirim ke spreadsheet!', 'success');
+    if (deliveredToSheet) {
+      showToast('Jawaban Anda berhasil masuk ke sheet Hasil_Jawaban Google Spreadsheet!', 'success');
+    } else {
+      showToast(`Jawaban Anda berhasil disimpan! Skor: ${result.skor}`, 'success');
+    }
   };
 
   // Logout participant
@@ -216,6 +240,18 @@ export default function App() {
     setCurrentParticipant(null);
     setIsExamActive(false);
     setActiveResult(null);
+  };
+
+  // Reset all exam results (kosongkan data pengerjaan & hapus semua nilai)
+  const handleResetResults = async () => {
+    setResults([]);
+    try {
+      const res = await clearAllResultsFromSheet();
+      showToast(res.message, 'success');
+    } catch {
+      clearCachedResults();
+      showToast('Seluruh nilai ujian berhasil direset ke 0 (semua peserta kembali ke status Belum Ujian).', 'success');
+    }
   };
 
   return (
@@ -297,6 +333,7 @@ export default function App() {
                   result={activeResult}
                   questions={questions}
                   config={config}
+                  deliveredToSheet={resultDeliveredToSheet}
                   onGoToLeaderboard={() => {}}
                   onRetakeExam={() => {
                     if (currentParticipant) {
@@ -349,6 +386,7 @@ export default function App() {
                 syncStatus={syncStatus}
                 onSyncWithSheets={syncDataFromSheets}
                 onConnectGoogle={handleConnectGoogle}
+                onResetResults={handleResetResults}
               />
             ) : adminTab === 'peserta' ? (
               /* Menu Data Peserta (NIK, Nama, Password) mengambil data dari sheet Data_Login */
@@ -370,7 +408,10 @@ export default function App() {
                 }}
               />
             ) : (
-              <LeaderboardScreen results={results} />
+              <LeaderboardScreen
+                results={results}
+                onResetResults={handleResetResults}
+              />
             )}
           </div>
         )}

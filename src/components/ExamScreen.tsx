@@ -7,7 +7,7 @@ interface ExamScreenProps {
   participant: Participant;
   questions: Question[];
   config: ExamConfig;
-  onFinishExam: (result: ExamResult) => void;
+  onFinishExam: (result: ExamResult, deliveredToSheet?: boolean) => void;
   onCancelExam: () => void;
 }
 
@@ -173,13 +173,13 @@ export const ExamScreen: React.FC<ExamScreenProps> = ({
     };
 
     // Submit directly to connected Google Spreadsheet (Hasil_Jawaban)
-    await submitResultToSheet(result);
+    const submitRes = await submitResultToSheet(result);
 
     // Clear active session storage
     localStorage.removeItem(activeSessionKey);
 
-    // Callback to display real-time result screen
-    onFinishExam(result);
+    // Callback to display real-time result screen with delivery status
+    onFinishExam(result, submitRes.deliveredToSheet);
   };
 
   return (

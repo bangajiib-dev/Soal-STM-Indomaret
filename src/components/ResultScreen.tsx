@@ -7,6 +7,7 @@ interface ResultScreenProps {
   result: ExamResult;
   questions: Question[];
   config: ExamConfig;
+  deliveredToSheet?: boolean;
   onGoToLeaderboard: () => void;
   onRetakeExam: () => void;
   onBackToLogin: () => void;
@@ -16,6 +17,7 @@ export const ResultScreen: React.FC<ResultScreenProps> = ({
   result,
   questions,
   config,
+  deliveredToSheet,
   onGoToLeaderboard,
   onRetakeExam,
   onBackToLogin,
@@ -59,10 +61,17 @@ export const ResultScreen: React.FC<ResultScreenProps> = ({
           <div className="w-1/3 bg-[#ed1c24]" />
         </div>
 
-        <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200 mb-4">
-          <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
-          <span>Hasil Ujian Berhasil Dicatat Real-Time di Google Spreadsheet</span>
-        </div>
+        {deliveredToSheet ? (
+          <div className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-xs font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200 mb-4 shadow-xs">
+            <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+            <span>Hasil Ujian Berhasil Dicatat Real-Time di Sheet Hasil_Jawaban</span>
+          </div>
+        ) : (
+          <div className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-xs font-semibold bg-blue-50 text-blue-800 border border-blue-200 mb-4 shadow-xs">
+            <CheckCircle2 className="w-4 h-4 text-blue-600 shrink-0" />
+            <span>Hasil Ujian Berhasil Direkam & Disimpan di Sistem CBT</span>
+          </div>
+        )}
 
         <h1 className="text-2xl sm:text-3xl font-extrabold text-slate-900 mb-1">
           Laporan Hasil Evaluasi Peserta

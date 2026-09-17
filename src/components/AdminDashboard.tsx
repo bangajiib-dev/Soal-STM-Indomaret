@@ -20,10 +20,30 @@ import {
   Award,
   ChevronLeft,
   ChevronRight,
+  Copy,
+  Check,
+  RotateCcw,
+  Send,
+  Download,
+  Code,
+  HelpCircle,
+  ShieldCheck,
 } from 'lucide-react';
 import { Participant, Question, ExamResult, ExamConfig, SheetSyncStatus } from '../types';
 import { SPREADSHEET_URL, SPREADSHEET_ID } from '../data/defaultData';
-import { addQuestionToSheet, deleteQuestionFromSheet, seedSpreadsheetWithDefaultData } from '../lib/sheetsService';
+import {
+  addQuestionToSheet,
+  deleteQuestionFromSheet,
+  seedSpreadsheetWithDefaultData,
+  getAppsScriptUrl,
+  saveAppsScriptUrl,
+  GOOGLE_APPS_SCRIPT_TEMPLATE,
+  testAppsScriptConnection,
+  pushAllResultsToSheet,
+  setupHasilJawabanHeader,
+  generateResultsTsv,
+} from '../lib/sheetsService';
+import { FIREBASE_PROJECT_ID } from '../lib/firebase';
 
 interface AdminDashboardProps {
   participants: Participant[];
@@ -35,6 +55,7 @@ interface AdminDashboardProps {
   syncStatus: SheetSyncStatus;
   onSyncWithSheets: () => void;
   onConnectGoogle: () => void;
+  onResetResults?: () => void;
 }
 
 export const AdminDashboard: React.FC<AdminDashboardProps> = ({
@@ -47,12 +68,14 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   syncStatus,
   onSyncWithSheets,
   onConnectGoogle,
+  onResetResults,
 }) => {
   const [activeAdminSubTab, setActiveAdminSubTab] = useState<'monitoring' | 'bank_soal' | 'spreadsheet' | 'pengaturan'>('monitoring');
   const [participantSearch, setParticipantSearch] = useState('');
   const [questionSearch, setQuestionSearch] = useState('');
   const [activityPage, setActivityPage] = useState(1);
   const activityPageSize = 25;
+  const [showResetResultsModal, setShowResetResultsModal] = useState(false);
 
   // Add Question Modal state
   const [showAddModal, setShowAddModal] = useState(false);
@@ -77,6 +100,104 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   // Seed status message
   const [seedLoading, setSeedLoading] = useState(false);
   const [seedFeedback, setSeedFeedback] = useState<{ success: boolean; message: string } | null>(null);
+  const [copiedDomain, setCopiedDomain] = useState(false);
+
+  // Apps Script Web App States
+  const [appsScriptUrlInput, setAppsScriptUrlInput] = useState<string>(getAppsScriptUrl());
+  const [isTestingScript, setIsTestingScript] = useState<boolean>(false);
+  const [scriptFeedback, setScriptFeedback] = useState<{ success: boolean; message: string } | null>(null);
+  const [copiedScript, setCopiedScript] = useState<boolean>(false);
+  const [copiedTsv, setCopiedTsv] = useState<boolean>(false);
+  const [isPushingResults, setIsPushingResults] = useState<boolean>(false);
+  const [pushFeedback, setPushFeedback] = useState<{ success: boolean; message: string } | null>(null);
+  const [isSettingHeader, setIsSettingHeader] = useState<boolean>(false);
+
+  const handleSaveAppsScriptUrl = () => {
+    saveAppsScriptUrl(appsScriptUrlInput);
+    setScriptFeedback({
+      success: true,
+      message: 'URL Web App Apps Script berhasil disimpan ke sistem.',
+    });
+  };
+
+  const handleTestAppsScript = async () => {
+    if (!appsScriptUrlInput.trim()) {
+      setScriptFeedback({
+        success: false,
+        message: 'Silakan masukkan URL Web App Google Apps Script terlebih dahulu.',
+      });
+      return;
+    }
+    setIsTestingScript(true);
+    setScriptFeedback(null);
+    try {
+      const res = await testAppsScriptConnection(appsScriptUrlInput);
+      setScriptFeedback(res);
+    } catch (e: any) {
+      setScriptFeedback({
+        success: false,
+        message: e.message || 'Gagal menguji koneksi Web App.',
+      });
+    } finally {
+      setIsTestingScript(false);
+    }
+  };
+
+  const handlePushAllResults = async () => {
+    setIsPushingResults(true);
+    setPushFeedback(null);
+    try {
+      const res = await pushAllResultsToSheet(results);
+      setPushFeedback(res);
+    } catch (e: any) {
+      setPushFeedback({
+        success: false,
+        message: e.message || 'Gagal mengirim hasil ujian ke spreadsheet.',
+      });
+    } finally {
+      setIsPushingResults(false);
+    }
+  };
+
+  const handleSetupHeader = async () => {
+    setIsSettingHeader(true);
+    setPushFeedback(null);
+    try {
+      const res = await setupHasilJawabanHeader();
+      setPushFeedback(res);
+    } catch (e: any) {
+      setPushFeedback({
+        success: false,
+        message: e.message || 'Gagal memasang baris header.',
+      });
+    } finally {
+      setIsSettingHeader(false);
+    }
+  };
+
+  const handleCopyAppsScript = () => {
+    navigator.clipboard.writeText(GOOGLE_APPS_SCRIPT_TEMPLATE);
+    setCopiedScript(true);
+    setTimeout(() => setCopiedScript(false), 3000);
+  };
+
+  const handleCopyTsv = () => {
+    const tsv = generateResultsTsv(results);
+    navigator.clipboard.writeText(tsv);
+    setCopiedTsv(true);
+    setTimeout(() => setCopiedTsv(false), 3000);
+  };
+
+  const handleDownloadCsv = () => {
+    const tsv = generateResultsTsv(results);
+    const csvContent = 'data:text/csv;charset=utf-8,\uFEFF' + encodeURIComponent(tsv.replace(/\t/g, ','));
+    const link = document.createElement('a');
+    link.setAttribute('href', csvContent);
+    link.setAttribute('download', `Hasil_Jawaban_STM_${new Date().toISOString().slice(0, 10)}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
 
   // Metrics calculation
   const totalParticipants = participants.length;
@@ -214,7 +335,18 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         </div>
 
         {/* Action Controls */}
-        <div className="flex items-center gap-2">
+        <div className="flex items-center flex-wrap gap-2">
+          {onResetResults && (
+            <button
+              onClick={() => setShowResetResultsModal(true)}
+              className="flex items-center gap-1.5 px-3.5 py-2 bg-rose-50 border border-rose-200 hover:bg-rose-100 text-rose-700 rounded-lg text-xs font-bold shadow-2xs transition-colors cursor-pointer"
+              title="Reset semua nilai ujian dan hapus semua data pengerjaan peserta"
+            >
+              <Trash2 className="w-3.5 h-3.5 text-rose-600" />
+              <span>Reset Semua Nilai {results.length > 0 ? `(${results.length})` : '(0)'}</span>
+            </button>
+          )}
+
           <button
             onClick={onSyncWithSheets}
             disabled={syncStatus.isLoading}
@@ -248,8 +380,20 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         </div>
 
         <div className="bg-white rounded-xl border border-slate-200 p-4 shadow-xs">
-          <div className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider mb-1">
-            Sudah Selesai
+          <div className="flex items-center justify-between mb-1">
+            <div className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">
+              Sudah Selesai
+            </div>
+            {onResetResults && results.length > 0 && (
+              <button
+                onClick={() => setShowResetResultsModal(true)}
+                className="text-[10px] font-bold text-rose-600 hover:text-rose-800 hover:underline flex items-center gap-0.5 cursor-pointer"
+                title="Reset seluruh nilai pengerjaan"
+              >
+                <RotateCcw className="w-2.5 h-2.5" />
+                <span>Reset</span>
+              </button>
+            )}
           </div>
           <div className="text-2xl font-black text-blue-600">{completedCount}</div>
           <div className="text-[11px] text-slate-400 mt-0.5">
@@ -356,20 +500,64 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               </p>
             </div>
 
-            <div className="relative w-full sm:w-64">
-              <Search className="w-4 h-4 absolute left-3 top-2.5 text-slate-400 pointer-events-none" />
-              <input
-                type="text"
-                value={participantSearch}
-                onChange={(e) => {
-                  setParticipantSearch(e.target.value);
-                  setActivityPage(1);
-                }}
-                placeholder="Cari Peserta / NIK / Toko..."
-                className="w-full pl-9 pr-3 py-1.5 bg-white border border-slate-300 rounded-lg text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
-              />
+            <div className="flex items-center gap-2 w-full sm:w-auto">
+              <div className="relative flex-1 sm:w-64">
+                <Search className="w-4 h-4 absolute left-3 top-2.5 text-slate-400 pointer-events-none" />
+                <input
+                  type="text"
+                  value={participantSearch}
+                  onChange={(e) => {
+                    setParticipantSearch(e.target.value);
+                    setActivityPage(1);
+                  }}
+                  placeholder="Cari Peserta / NIK / Toko..."
+                  className="w-full pl-9 pr-3 py-1.5 bg-white border border-slate-300 rounded-lg text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+              {onResetResults && (
+                <button
+                  onClick={() => setShowResetResultsModal(true)}
+                  className="shrink-0 flex items-center gap-1.5 px-3 py-1.5 bg-rose-50 border border-rose-200 hover:bg-rose-100 text-rose-700 rounded-lg text-xs font-semibold transition-colors cursor-pointer"
+                  title="Reset semua nilai ujian dan hapus data hasil pengerjaan"
+                >
+                  <Trash2 className="w-3.5 h-3.5 text-rose-600" />
+                  <span className="hidden sm:inline">Reset Nilai</span>
+                </button>
+              )}
             </div>
           </div>
+
+          {/* Real-time sync status banner */}
+          {completedCount === 0 ? (
+            <div className="mx-4 sm:mx-5 my-3 p-3 bg-emerald-50/70 border border-emerald-200 rounded-xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 text-xs text-emerald-900">
+              <div className="flex items-center gap-2">
+                <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                <span>
+                  Status tersinkron dengan spreadsheet: Sheet <strong className="font-semibold">Hasil_Jawaban</strong> saat ini kosong (0 jawaban). Seluruh <strong className="font-semibold">{totalParticipants.toLocaleString('id-ID')} peserta</strong> berstatus <strong className="font-semibold text-emerald-800">Belum Ujian</strong>.
+                </span>
+              </div>
+              <span className="text-[10px] font-bold text-emerald-800 bg-emerald-100 px-2 py-0.5 rounded shrink-0">
+                0 Selesai (100% Belum Ujian)
+              </span>
+            </div>
+          ) : (
+            <div className="mx-4 sm:mx-5 my-3 p-3 bg-blue-50/70 border border-blue-200 rounded-xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 text-xs text-blue-900">
+              <div className="flex items-center gap-2">
+                <CheckCircle2 className="w-4 h-4 text-blue-600 shrink-0" />
+                <span>
+                  Terdata <strong>{completedCount} peserta</strong> telah menyelesaikan ujian. Jika sheet Hasil_Jawaban telah Anda kosongkan secara manual di Google Sheets, klik tombol <strong>Sinkronkan Sheets</strong> atau <strong>Reset Hasil</strong>.
+                </span>
+              </div>
+              {onResetResults && (
+                <button
+                  onClick={() => setShowResetResultsModal(true)}
+                  className="px-2.5 py-1 bg-rose-600 hover:bg-rose-700 text-white rounded-md text-[11px] font-semibold transition-colors cursor-pointer shrink-0"
+                >
+                  Reset / Kosongkan Hasil
+                </button>
+              )}
+            </div>
+          )}
 
           <div className="overflow-x-auto">
             <table className="w-full text-left border-collapse">
@@ -627,6 +815,85 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               Aplikasi ini terhubung langsung ke Google Sheets yang ditentukan pada parameter tugas.
             </p>
 
+            {/* Error Guidance Card if Google Auth failed */}
+            {syncStatus.error && (
+              <div className="mb-5 p-4 rounded-xl border border-rose-200 bg-rose-50/70 text-xs space-y-2.5 animate-in fade-in">
+                <div className="flex items-start gap-2.5">
+                  <AlertCircle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
+                  <div className="flex-1">
+                    <p className="font-bold text-rose-900">Kendala Hubungkan Akun Google</p>
+                    <p className="text-rose-700 mt-0.5 leading-relaxed">{syncStatus.error}</p>
+                  </div>
+                </div>
+
+                {(syncStatus.error.includes('Authorized Domains') ||
+                  syncStatus.error.includes('unauthorized-domain') ||
+                  syncStatus.error.includes('diizinkan')) && (
+                  <div className="mt-3 pt-3 border-t border-rose-200/60 bg-white p-3.5 rounded-lg border border-slate-200 space-y-2 text-slate-700">
+                    <div className="flex items-center justify-between gap-2 flex-wrap pb-1 border-b border-slate-100">
+                      <span className="font-bold text-slate-900">Domain Website Anda Saat Ini:</span>
+                      <div className="flex items-center gap-1.5">
+                        <code className="px-2 py-0.5 bg-blue-50 text-blue-800 font-mono font-bold rounded border border-blue-200">
+                          {typeof window !== 'undefined' ? window.location.hostname : 'soalstmindomaret.vercel.app'}
+                        </code>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (typeof window !== 'undefined') {
+                              navigator.clipboard.writeText(window.location.hostname);
+                              setCopiedDomain(true);
+                              setTimeout(() => setCopiedDomain(false), 2000);
+                            }
+                          }}
+                          className="px-2.5 py-1 text-[11px] rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold border border-slate-300 flex items-center gap-1 transition-colors cursor-pointer"
+                        >
+                          {copiedDomain ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5 text-slate-600" />}
+                          <span>{copiedDomain ? 'Tersalin!' : 'Salin Domain'}</span>
+                        </button>
+                      </div>
+                    </div>
+
+                    <p className="font-bold text-slate-800 pt-1">
+                      Langkah Mengizinkan Domain di Firebase Console (Hanya 1x):
+                    </p>
+                    <ol className="list-decimal list-inside space-y-1.5 text-slate-600 pl-1">
+                      <li>
+                        Buka{' '}
+                        <a
+                          href={`https://console.firebase.google.com/project/${FIREBASE_PROJECT_ID}/authentication/settings`}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="text-blue-600 font-bold underline inline-flex items-center gap-0.5"
+                        >
+                          Firebase Console Authentication Settings
+                          <ExternalLink className="w-3 h-3 inline ml-0.5" />
+                        </a>
+                      </li>
+                      <li>
+                        Pilih menu / tab <strong>Authorized domains</strong> (Domain yang diizinkan)
+                      </li>
+                      <li>
+                        Klik tombol <strong>Add domain</strong> (Tambahkan domain)
+                      </li>
+                      <li>
+                        Tempel domain{' '}
+                        <span className="font-mono font-bold text-slate-900">
+                          {typeof window !== 'undefined' ? window.location.hostname : 'soalstmindomaret.vercel.app'}
+                        </span>
+                      </li>
+                      <li>
+                        Klik <strong>Save</strong> (Simpan), lalu klik kembali tombol <strong>Hubungkan Akun Google</strong> di bawah.
+                      </li>
+                    </ol>
+
+                    <div className="mt-2.5 p-2.5 bg-emerald-50 text-emerald-800 rounded-lg border border-emerald-200 text-[11px] leading-relaxed">
+                      💡 <strong>Catatan:</strong> Sinkronisasi 5.011 peserta, bank soal, pengerjaan ujian peserta, dan rekap hasil nilai <strong>tetap berfungsi normal</strong> tanpa harus menghubungkan akun Google.
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
             <div className="bg-slate-50 rounded-xl p-4 border border-slate-200 space-y-3 mb-6 text-xs">
               <div className="flex flex-col sm:flex-row sm:justify-between py-1 border-b border-slate-200">
                 <span className="text-slate-500">Spreadsheet Target:</span>
@@ -711,6 +978,215 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                   <XCircle className="w-4 h-4 text-rose-600 shrink-0" />
                 )}
                 <span>{seedFeedback.message}</span>
+              </div>
+            )}
+
+            {/* KONEKSI OTOMATIS: GOOGLE APPS SCRIPT WEBHOOK UNTUK SHEET HASIL_JAWABAN */}
+            <div className="mt-8 pt-6 border-t border-slate-200">
+              <div className="bg-blue-50/60 border border-blue-200 rounded-xl p-5">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-3">
+                  <div className="flex items-center gap-2">
+                    <Code className="w-5 h-5 text-blue-600 shrink-0" />
+                    <div>
+                      <h4 className="text-sm font-bold text-slate-900">
+                        Penerima Hasil Ujian Otomatis (Google Apps Script Webhook)
+                      </h4>
+                      <p className="text-xs text-slate-600">
+                        Solusi agar seluruh peserta (dari HP / Laptop manapun) dapat mengirim skor ujian langsung masuk ke sheet <strong>Hasil_Jawaban</strong> secara real-time.
+                      </p>
+                    </div>
+                  </div>
+                  <div>
+                    {appsScriptUrlInput.trim() ? (
+                      <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-300">
+                        <CheckCircle2 className="w-3.5 h-3.5" />
+                        Webhook Aktif
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-semibold bg-amber-100 text-amber-800 border border-amber-300">
+                        <AlertCircle className="w-3.5 h-3.5" />
+                        Belum Terpasang
+                      </span>
+                    )}
+                  </div>
+                </div>
+
+                {/* Panduan Singkat 4 Langkah */}
+                <div className="bg-white rounded-lg p-3.5 border border-blue-100 mb-4 text-xs text-slate-700 space-y-2">
+                  <div className="font-bold text-slate-900 flex items-center justify-between">
+                    <span>Cara Pasang di Google Spreadsheet Target (Hanya 1x):</span>
+                    <button
+                      onClick={handleCopyAppsScript}
+                      className="inline-flex items-center gap-1 px-2.5 py-1 bg-blue-600 hover:bg-blue-700 text-white rounded text-[11px] font-bold shadow-xs cursor-pointer transition-colors"
+                    >
+                      {copiedScript ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+                      <span>{copiedScript ? 'Kode Berhasil Disalin!' : 'Salin Kode Apps Script'}</span>
+                    </button>
+                  </div>
+                  <ol className="list-decimal list-inside space-y-1.5 text-slate-600 pl-1 leading-relaxed">
+                    <li>
+                      Buka Google Spreadsheet target Anda, lalu klik menu <strong>Ekstensi</strong> &gt; <strong>Apps Script</strong>.
+                    </li>
+                    <li>
+                      Hapus semua kode bawaan di editor, lalu klik tombol <strong>Salin Kode Apps Script</strong> di atas dan tempel (Paste).
+                    </li>
+                    <li>
+                      Klik tombol <strong>Terapkan (Deploy)</strong> di pojok kanan atas &gt; <strong>Penerapan baru (New deployment)</strong>.
+                    </li>
+                    <li>
+                      Klik ikon gerigi &gt; pilih <strong>Aplikasi Web (Web App)</strong>.
+                    </li>
+                    <li>
+                      Bagian <em>Siapa yang memiliki akses (Who has access)</em>: pilih <strong>Siapa saja (Anyone)</strong>, lalu klik <strong>Terapkan (Deploy)</strong> &amp; Izinkan Akses.
+                    </li>
+                    <li>
+                      Salin <strong>URL Aplikasi Web</strong> (berakhiran <code>/exec</code>), tempel di kolom bawah ini, lalu klik <strong>Simpan &amp; Uji Coba</strong>.
+                    </li>
+                  </ol>
+                </div>
+
+                {/* Form Input Webhook URL */}
+                <div className="space-y-2">
+                  <label className="text-xs font-bold text-slate-800 block">
+                    URL Aplikasi Web Apps Script:
+                  </label>
+                  <div className="flex flex-col sm:flex-row items-stretch gap-2">
+                    <input
+                      type="url"
+                      value={appsScriptUrlInput}
+                      onChange={(e) => setAppsScriptUrlInput(e.target.value)}
+                      placeholder="https://script.google.com/macros/s/.../exec"
+                      className="flex-1 px-3 py-2 text-xs border border-slate-300 rounded-lg focus:outline-hidden focus:ring-2 focus:ring-blue-500 font-mono bg-white"
+                    />
+                    <button
+                      onClick={handleSaveAppsScriptUrl}
+                      className="px-3.5 py-2 bg-slate-800 hover:bg-slate-900 text-white rounded-lg text-xs font-bold transition-colors cursor-pointer shrink-0"
+                    >
+                      Simpan URL
+                    </button>
+                    <button
+                      onClick={handleTestAppsScript}
+                      disabled={isTestingScript}
+                      className="px-3.5 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-bold transition-colors cursor-pointer shrink-0 flex items-center justify-center gap-1.5 shadow-xs"
+                    >
+                      <Send className={`w-3.5 h-3.5 ${isTestingScript ? 'animate-spin' : ''}`} />
+                      <span>{isTestingScript ? 'Sedang Menguji...' : 'Uji Kirim Baris TEST ke Sheet'}</span>
+                    </button>
+                  </div>
+
+                  {scriptFeedback && (
+                    <div
+                      className={`mt-2 p-2.5 rounded-lg text-xs flex items-center gap-2 ${
+                        scriptFeedback.success
+                          ? 'bg-emerald-50 text-emerald-800 border border-emerald-200'
+                          : 'bg-rose-50 text-rose-800 border border-rose-200'
+                      }`}
+                    >
+                      {scriptFeedback.success ? (
+                        <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                      ) : (
+                        <XCircle className="w-4 h-4 text-rose-600 shrink-0" />
+                      )}
+                      <span>{scriptFeedback.message}</span>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            {/* SINKRONISASI & EKSPOR HASIL JAWABAN (BATCH PUSH & DOWNLOAD) */}
+            <div className="mt-6 pt-5 border-t border-slate-200">
+              <div className="bg-slate-50 border border-slate-200 rounded-xl p-5">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
+                  <div>
+                    <h4 className="text-sm font-bold text-slate-900 flex items-center gap-1.5">
+                      <FileSpreadsheet className="w-4 h-4 text-emerald-600" />
+                      <span>Kelola &amp; Kirim Data ke Sheet Hasil_Jawaban</span>
+                    </h4>
+                    <p className="text-xs text-slate-500">
+                      Total <strong>{results.length}</strong> peserta telah menyelesaikan ujian dan nilainya tersimpan di sistem.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-2.5">
+                  <button
+                    onClick={handlePushAllResults}
+                    disabled={isPushingResults || results.length === 0}
+                    className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white rounded-lg text-xs font-bold shadow-xs transition-colors flex items-center gap-1.5 cursor-pointer"
+                  >
+                    <Send className={`w-3.5 h-3.5 ${isPushingResults ? 'animate-spin' : ''}`} />
+                    <span>{isPushingResults ? 'Sedang Mengirim...' : `Kirim ${results.length} Data ke Sheet Hasil_Jawaban`}</span>
+                  </button>
+
+                  <button
+                    onClick={handleSetupHeader}
+                    disabled={isSettingHeader}
+                    className="px-3.5 py-2 bg-white border border-slate-300 hover:bg-slate-100 text-slate-800 rounded-lg text-xs font-semibold transition-colors flex items-center gap-1.5 cursor-pointer"
+                  >
+                    <Sliders className={`w-3.5 h-3.5 ${isSettingHeader ? 'animate-spin' : ''}`} />
+                    <span>Pasang Header Kolom Hasil_Jawaban (A1:O1)</span>
+                  </button>
+
+                  <button
+                    onClick={handleCopyTsv}
+                    disabled={results.length === 0}
+                    className="px-3.5 py-2 bg-white border border-slate-300 hover:bg-slate-100 text-slate-800 rounded-lg text-xs font-semibold transition-colors flex items-center gap-1.5 cursor-pointer"
+                  >
+                    {copiedTsv ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5" />}
+                    <span>{copiedTsv ? 'Data Berhasil Disalin!' : 'Salin Data untuk Paste ke Spreadsheet (Ctrl+V)'}</span>
+                  </button>
+
+                  <button
+                    onClick={handleDownloadCsv}
+                    disabled={results.length === 0}
+                    className="px-3.5 py-2 bg-white border border-slate-300 hover:bg-slate-100 text-slate-800 rounded-lg text-xs font-semibold transition-colors flex items-center gap-1.5 cursor-pointer"
+                  >
+                    <Download className="w-3.5 h-3.5" />
+                    <span>Download CSV</span>
+                  </button>
+                </div>
+
+                {pushFeedback && (
+                  <div
+                    className={`mt-3.5 p-3 rounded-lg text-xs flex items-center gap-2 ${
+                      pushFeedback.success
+                        ? 'bg-emerald-50 text-emerald-800 border border-emerald-200'
+                        : 'bg-rose-50 text-rose-800 border border-rose-200'
+                    }`}
+                  >
+                    {pushFeedback.success ? (
+                      <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                    ) : (
+                      <XCircle className="w-4 h-4 text-rose-600 shrink-0" />
+                    )}
+                    <span>{pushFeedback.message}</span>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Reset / Hapus Seluruh Nilai Ujian (Hasil_Jawaban) */}
+            {onResetResults && (
+              <div className="mt-6 pt-5 border-t border-slate-200">
+                <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 p-4 bg-rose-50/70 border border-rose-200 rounded-xl">
+                  <div>
+                    <h4 className="text-xs font-bold text-rose-900 uppercase tracking-wider flex items-center gap-1.5 mb-1">
+                      <Trash2 className="w-4 h-4 text-rose-600 shrink-0" />
+                      <span>Reset & Hapus Semua Nilai (Sheet: Hasil_Jawaban)</span>
+                    </h4>
+                    <p className="text-xs text-rose-700/90 leading-relaxed">
+                      Mengosongkan seluruh perolehan skor ujian, catatan jawaban, dan mereset status semua peserta menjadi <strong>Belum Ujian</strong>.
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => setShowResetResultsModal(true)}
+                    className="shrink-0 px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white rounded-lg text-xs font-bold shadow-xs transition-colors flex items-center gap-1.5 cursor-pointer"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                    <span>Reset Semua Nilai {results.length > 0 ? `(${results.length})` : '(0)'}</span>
+                  </button>
+                </div>
               </div>
             )}
           </div>
@@ -1008,6 +1484,59 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                     <span>Hapus Soal</span>
                   </>
                 )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {/* Modal: Confirm Reset All Results */}
+      {showResetResultsModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-xs animate-in fade-in">
+          <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl border border-slate-200">
+            <div className="flex items-center gap-3 mb-4 text-rose-600">
+              <div className="w-10 h-10 rounded-full bg-rose-100 flex items-center justify-center">
+                <Trash2 className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="text-base font-bold text-slate-900">
+                  Reset & Hapus Semua Nilai Ujian?
+                </h3>
+                <p className="text-xs text-slate-500">
+                  Mengosongkan seluruh perolehan nilai dan mengembalikan status peserta ke Belum Ujian
+                </p>
+              </div>
+            </div>
+
+            <div className="bg-slate-50 rounded-xl p-3.5 border border-slate-200 text-xs text-slate-700 mb-5 space-y-2">
+              <p>
+                Saat ini terdapat <strong className="text-slate-900">{results.length} data nilai pengerjaan</strong> tersimpan di aplikasi.
+              </p>
+              <p className="text-slate-500">
+                Tindakan ini akan menghapus seluruh data pengerjaan pada aplikasi dan sheet <strong className="text-slate-700">Hasil_Jawaban</strong> di Google Spreadsheet. Seluruh peserta akan kembali memiliki status <strong>Belum Ujian</strong>.
+              </p>
+            </div>
+
+            <div className="flex items-center gap-3">
+              <button
+                type="button"
+                onClick={() => setShowResetResultsModal(false)}
+                className="flex-1 py-2.5 rounded-xl border border-slate-200 text-slate-700 hover:bg-slate-100 text-xs font-semibold transition-colors cursor-pointer"
+              >
+                Batal
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  if (onResetResults) {
+                    onResetResults();
+                  }
+                  setShowResetResultsModal(false);
+                }}
+                className="flex-1 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold transition-colors shadow-xs flex items-center justify-center gap-2 cursor-pointer"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>Ya, Hapus Semua Nilai</span>
               </button>
             </div>
           </div>

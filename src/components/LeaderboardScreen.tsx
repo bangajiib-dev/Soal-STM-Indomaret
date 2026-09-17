@@ -1,18 +1,21 @@
 import React, { useState, useMemo } from 'react';
-import { Trophy, Medal, Award, Clock, Search, Filter, Sparkles, Building2, User, CheckCircle2, ChevronRight, Printer } from 'lucide-react';
+import { Trophy, Medal, Award, Clock, Search, Filter, Sparkles, Building2, User, CheckCircle2, ChevronRight, Printer, Trash2 } from 'lucide-react';
 import { ExamResult } from '../types';
 
 interface LeaderboardScreenProps {
   results: ExamResult[];
   onTakeExam?: () => void;
+  onResetResults?: () => void;
 }
 
 export const LeaderboardScreen: React.FC<LeaderboardScreenProps> = ({
   results,
   onTakeExam,
+  onResetResults,
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [filterStatus, setFilterStatus] = useState<'all' | 'LULUS' | 'TIDAK LULUS'>('all');
+  const [showResetModal, setShowResetModal] = useState(false);
 
   // Strict sorting based on user requirement:
   // 1. Highest Score (skor DESC)
@@ -79,7 +82,18 @@ export const LeaderboardScreen: React.FC<LeaderboardScreenProps> = ({
           </p>
         </div>
 
-        <div className="flex items-center gap-2 print:hidden">
+        <div className="flex items-center flex-wrap gap-2 print:hidden">
+          {onResetResults && (
+            <button
+              onClick={() => setShowResetModal(true)}
+              className="flex items-center gap-1.5 px-3.5 py-2 bg-rose-50 border border-rose-200 hover:bg-rose-100 text-rose-700 rounded-lg text-xs font-semibold shadow-2xs transition-colors cursor-pointer"
+              title="Reset semua nilai ujian dan hapus data hasil ujian"
+            >
+              <Trash2 className="w-4 h-4 text-rose-600" />
+              <span>Reset Semua Nilai {results.length > 0 ? `(${results.length})` : '(0)'}</span>
+            </button>
+          )}
+
           <button
             onClick={handlePrint}
             className="flex items-center gap-1.5 px-3.5 py-2 bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 rounded-lg text-xs font-semibold shadow-2xs transition-colors cursor-pointer"
@@ -409,6 +423,60 @@ export const LeaderboardScreen: React.FC<LeaderboardScreenProps> = ({
           </table>
         </div>
       </div>
+
+      {/* Modal: Confirm Reset All Results */}
+      {showResetModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-xs animate-in fade-in">
+          <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl border border-slate-200">
+            <div className="flex items-center gap-3 mb-4 text-rose-600">
+              <div className="w-10 h-10 rounded-full bg-rose-100 flex items-center justify-center">
+                <Trash2 className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="text-base font-bold text-slate-900">
+                  Reset & Hapus Semua Nilai?
+                </h3>
+                <p className="text-xs text-slate-500">
+                  Semua data perolehan skor dan klasemen akan dikosongkan
+                </p>
+              </div>
+            </div>
+
+            <div className="bg-slate-50 rounded-xl p-3.5 border border-slate-200 text-xs text-slate-700 mb-5 space-y-2">
+              <p>
+                Saat ini tercatat <strong className="text-slate-900">{results.length} data pengerjaan</strong> pada klasemen.
+              </p>
+              <p className="text-slate-500">
+                Tindakan ini akan mengosongkan seluruh nilai pada aplikasi dan sheet <strong className="text-slate-700">Hasil_Jawaban</strong> di Google Spreadsheet. Seluruh peserta akan kembali berstatus Belum Ujian.
+              </p>
+            </div>
+
+            <div className="flex items-center gap-3">
+              <button
+                type="button"
+                onClick={() => setShowResetModal(false)}
+                className="flex-1 py-2.5 rounded-xl border border-slate-200 text-slate-700 hover:bg-slate-100 text-xs font-semibold transition-colors cursor-pointer"
+              >
+                Batal
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  if (onResetResults) {
+                    onResetResults();
+                  }
+                  setShowResetModal(false);
+                }}
+                className="flex-1 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold transition-colors shadow-xs flex items-center justify-center gap-2 cursor-pointer"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>Ya, Hapus Semua Nilai</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

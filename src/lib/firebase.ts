@@ -46,6 +46,8 @@ export const initAuth = (
   });
 };
 
+export const FIREBASE_PROJECT_ID = firebaseConfig.projectId;
+
 // Sign in with Google to get access token for Google Sheets API
 export const googleSignIn = async (): Promise<{ user: User; accessToken: string } | null> => {
   try {
@@ -63,6 +65,20 @@ export const googleSignIn = async (): Promise<{ user: User; accessToken: string 
     return { user: result.user, accessToken: cachedAccessToken };
   } catch (error: any) {
     console.error('Sign in error:', error);
+    if (error.code === 'auth/unauthorized-domain' || error.message?.includes('auth/unauthorized-domain')) {
+      const currentHost = typeof window !== 'undefined' ? window.location.hostname : 'domain Anda';
+      const friendlyErr = new Error(
+        `Domain "${currentHost}" belum diizinkan di Firebase Authentication. Tambahkan "${currentHost}" ke Authorized Domains di Firebase Console.`
+      );
+      (friendlyErr as any).code = 'auth/unauthorized-domain';
+      (friendlyErr as any).domain = currentHost;
+      throw friendlyErr;
+    }
+    if (error.code === 'auth/popup-closed-by-user') {
+      const friendlyErr = new Error('Login Google dibatalkan oleh pengguna (jendela popup ditutup).');
+      (friendlyErr as any).code = 'auth/popup-closed-by-user';
+      throw friendlyErr;
+    }
     throw error;
   } finally {
     isSigningIn = false;

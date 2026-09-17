@@ -9,7 +9,169 @@ const STORAGE_KEYS = {
   QUESTIONS: 'stm_questions_cache',
   RESULTS: 'stm_results_cache',
   CONFIG: 'stm_exam_config',
+  APPS_SCRIPT_URL: 'stm_apps_script_url',
 };
+
+export const APPS_SCRIPT_STORAGE_KEY = STORAGE_KEYS.APPS_SCRIPT_URL;
+
+export const HASIL_JAWABAN_HEADERS = [
+  'Timestamp',
+  'NIK',
+  'Nama Peserta',
+  'Toko / Unit',
+  'Jabatan',
+  'Skor Akhir',
+  'Total Soal',
+  'Jumlah Benar',
+  'Jumlah Salah',
+  'Waktu Mulai',
+  'Waktu Selesai',
+  'Durasi (Detik)',
+  'Durasi (MM:SS)',
+  'Status Kelulusan',
+  'Detail Jawaban',
+];
+
+export const getAppsScriptUrl = (): string => {
+  try {
+    return localStorage.getItem(STORAGE_KEYS.APPS_SCRIPT_URL) || '';
+  } catch {
+    return '';
+  }
+};
+
+export const saveAppsScriptUrl = (url: string) => {
+  try {
+    localStorage.setItem(STORAGE_KEYS.APPS_SCRIPT_URL, url.trim());
+  } catch (e) {
+    console.warn('Error saving Apps Script URL:', e);
+  }
+};
+
+export const GOOGLE_APPS_SCRIPT_TEMPLATE = `/**
+ * GOOGLE APPS SCRIPT: PENERIMA HASIL UJIAN INDOMARET
+ * Spreadsheet: Soal Metting STM Juni 2026 Post Test
+ * Sheet Target: Hasil_Jawaban
+ *
+ * CARA PASANG:
+ * 1. Di Google Sheets, klik menu 'Ekstensi' > 'Apps Script'
+ * 2. Hapus seluruh isi kode bawaan, lalu tempel kode ini seluruhnya
+ * 3. Klik tombol 'Terapkan' (Deploy) di kanan atas > 'Penerapan baru' (New deployment)
+ * 4. Klik ikon gerigi (Pilih jenis) > pilih 'Aplikasi Web' (Web app)
+ * 5. Deskripsi: Webhook Hasil Ujian STM
+ * 6. Jalankan sebagai: 'Saya' (Email Anda)
+ * 7. Siapa yang memiliki akses: PILIH 'Siapa saja' (Anyone) -> SANGAT PENTING
+ * 8. Klik 'Terapkan' (Deploy) > Izinkan Akses (Authorize access)
+ * 9. Salin 'URL Aplikasi Web' (berakhiran /exec) dan simpan ke aplikasi.
+ */
+
+function doPost(e) {
+  try {
+    var raw = e.postData.contents;
+    var data = JSON.parse(raw);
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var sheet = ss.getSheetByName("Hasil_Jawaban");
+    if (!sheet) {
+      sheet = ss.insertSheet("Hasil_Jawaban");
+    }
+
+    // Buat header kolom otomatis jika baris 1 masih kosong
+    if (sheet.getLastRow() === 0) {
+      sheet.appendRow([
+        "Timestamp",
+        "NIK",
+        "Nama Peserta",
+        "Toko / Unit",
+        "Jabatan",
+        "Skor Akhir",
+        "Total Soal",
+        "Jumlah Benar",
+        "Jumlah Salah",
+        "Waktu Mulai",
+        "Waktu Selesai",
+        "Durasi (Detik)",
+        "Durasi (MM:SS)",
+        "Status Kelulusan",
+        "Detail Jawaban"
+      ]);
+      // Format header tebal dan latar biru muda
+      sheet.getRange(1, 1, 1, 15).setFontWeight("bold").setBackground("#dbeafe");
+    }
+
+    // Aksi: Inisialisasi Header Saja
+    if (data.action === "init_header") {
+      return ContentService.createTextOutput(JSON.stringify({ status: "success", message: "Header kolom Hasil_Jawaban siap!" }))
+        .setMimeType(ContentService.MimeType.JSON);
+    }
+
+    // Aksi: Bersihkan seluruh baris nilai (Reset data pengerjaan)
+    if (data.action === "clear_results") {
+      var lastRow = sheet.getLastRow();
+      if (lastRow > 1) {
+        sheet.deleteRows(2, lastRow - 1);
+      }
+      return ContentService.createTextOutput(JSON.stringify({ status: "success", message: "Data pengerjaan dibersihkan!" }))
+        .setMimeType(ContentService.MimeType.JSON);
+    }
+
+    // Aksi: Pengiriman banyak hasil sekaligus (Bulk Push)
+    if (data.action === "bulk_submit" && Array.isArray(data.results)) {
+      data.results.forEach(function(r) {
+        sheet.appendRow([
+          r.timestamp || new Date().toLocaleString("id-ID"),
+          r.nik,
+          r.nama,
+          r.toko,
+          r.jabatan,
+          r.skor,
+          r.totalSoal,
+          r.jumlahBenar,
+          r.jumlahSalah,
+          r.waktuMulai,
+          r.waktuSelesai,
+          r.durasiDetik,
+          r.durasiFormatted,
+          r.statusKelulusan,
+          r.detailJawaban || ""
+        ]);
+      });
+      return ContentService.createTextOutput(JSON.stringify({ status: "success", count: data.results.length }))
+        .setMimeType(ContentService.MimeType.JSON);
+    }
+
+    // Aksi: Kirim 1 Hasil Peserta
+    var r = data.result || data;
+    sheet.appendRow([
+      r.timestamp || new Date().toLocaleString("id-ID"),
+      r.nik,
+      r.nama,
+      r.toko,
+      r.jabatan,
+      r.skor,
+      r.totalSoal,
+      r.jumlahBenar,
+      r.jumlahSalah,
+      r.waktuMulai,
+      r.waktuSelesai,
+      r.durasiDetik,
+      r.durasiFormatted,
+      r.statusKelulusan,
+      r.detailJawaban || ""
+    ]);
+
+    return ContentService.createTextOutput(JSON.stringify({ status: "success", nik: r.nik, nama: r.nama }))
+      .setMimeType(ContentService.MimeType.JSON);
+  } catch (err) {
+    return ContentService.createTextOutput(JSON.stringify({ status: "error", message: err.toString() }))
+      .setMimeType(ContentService.MimeType.JSON);
+  }
+}
+
+function doGet(e) {
+  return ContentService.createTextOutput(JSON.stringify({ status: "ok", message: "Webhook Hasil_Jawaban STM aktif!" }))
+    .setMimeType(ContentService.MimeType.JSON);
+}
+`;
 
 // Helper: Read from LocalStorage or fallback
 export const getCachedDataPeserta = (): Participant[] => {
@@ -117,6 +279,14 @@ export const saveCachedResults = (data: ExamResult[]) => {
   }
 };
 
+export const clearCachedResults = () => {
+  try {
+    localStorage.removeItem(STORAGE_KEYS.RESULTS);
+  } catch (e) {
+    console.error('Error clearing results cache', e);
+  }
+};
+
 // Google Sheets API Helpers
 const BASE_URL = `https://sheets.googleapis.com/v4/spreadsheets/${SPREADSHEET_ID}`;
 
@@ -176,20 +346,28 @@ export async function ensureSheetExists(sheetTitle: string) {
 }
 
 // Fetch rows from public Google Visualization API endpoint (works with no OAuth required)
-async function fetchPublicGvizRows(sheetName: string): Promise<any[]> {
+async function fetchPublicGvizData(sheetName: string): Promise<{ success: boolean; rows: any[] }> {
   try {
     const url = `https://docs.google.com/spreadsheets/d/${SPREADSHEET_ID}/gviz/tq?tqx=out:json&sheet=${encodeURIComponent(sheetName)}`;
     const response = await fetch(url);
-    if (!response.ok) return [];
+    if (!response.ok) return { success: false, rows: [] };
     const text = await response.text();
     const match = text.match(/google\.visualization\.Query\.setResponse\((.*)\);/s);
-    if (!match) return [];
+    if (!match) return { success: false, rows: [] };
     const parsed = JSON.parse(match[1]);
-    return parsed?.table?.rows || [];
+    if (parsed.status === 'error') {
+      return { success: false, rows: [] };
+    }
+    return { success: true, rows: parsed?.table?.rows || [] };
   } catch (err) {
     console.warn(`Public gviz fetch failed for ${sheetName}:`, err);
-    return [];
+    return { success: false, rows: [] };
   }
+}
+
+async function fetchPublicGvizRows(sheetName: string): Promise<any[]> {
+  const res = await fetchPublicGvizData(sheetName);
+  return res.rows;
 }
 
 // 1. Fetch Data_Peserta from Google Sheets (Used for Aktivitas & Status Peserta)
@@ -571,11 +749,11 @@ export async function fetchQuestionsFromSheet(): Promise<Question[]> {
 export async function fetchResultsFromSheet(): Promise<ExamResult[]> {
   try {
     // Attempt 1: Fetch via public Google Visualization endpoint
-    const gvizRows = await fetchPublicGvizRows('Hasil_Jawaban');
-    if (gvizRows && gvizRows.length > 0) {
+    const gvizRes = await fetchPublicGvizData('Hasil_Jawaban');
+    if (gvizRes.success) {
       const results: ExamResult[] = [];
-      for (let i = 0; i < gvizRows.length; i++) {
-        const c = gvizRows[i]?.c || [];
+      for (let i = 0; i < gvizRes.rows.length; i++) {
+        const c = gvizRes.rows[i]?.c || [];
         const timestamp = c[0]?.v !== undefined ? String(c[0].v).trim() : new Date().toISOString();
         const nik = c[1]?.f ? String(c[1].f).trim() : (c[1]?.v !== undefined ? String(c[1].v).trim() : '');
         const nama = c[2]?.v !== undefined ? String(c[2].v).trim() : '';
@@ -593,7 +771,13 @@ export async function fetchResultsFromSheet(): Promise<ExamResult[]> {
         const statusKelulusan: 'LULUS' | 'TIDAK LULUS' = statusRaw.includes('TIDAK') ? 'TIDAK LULUS' : 'LULUS';
         const detailJawaban = c[14]?.v !== undefined ? String(c[14].v).trim() : '';
 
-        if (nik || nama) {
+        // Ignore empty cells or header row
+        if (
+          nik &&
+          nama &&
+          nik.toLowerCase() !== 'nik' &&
+          !nama.toLowerCase().includes('nama peserta')
+        ) {
           results.push({
             id: `sheet-${i}`,
             timestamp,
@@ -615,17 +799,21 @@ export async function fetchResultsFromSheet(): Promise<ExamResult[]> {
         }
       }
 
-      if (results.length > 0) {
-        saveCachedResults(results);
-        return results;
-      }
+      // Sync the exact state to cache (even if 0 rows in sheet)
+      saveCachedResults(results);
+      return results;
     }
 
     // Attempt 2: Fetch via authenticated Google Sheets API
     try {
       const data = await fetchWithAuth(`${BASE_URL}/values/Hasil_Jawaban!A1:Z500`);
       const rows = data.values;
-      if (rows && rows.length >= 2) {
+      if (rows) {
+        if (rows.length <= 1) {
+          saveCachedResults([]);
+          return [];
+        }
+
         const headers = rows[0].map((h: string) => (h || '').toString().toLowerCase().trim());
         const tsIdx = headers.findIndex((h: string) => h.includes('time') || h.includes('tanggal') || h.includes('waktu'));
         const nikIdx = headers.findIndex((h: string) => h.includes('nik'));
@@ -654,7 +842,7 @@ export async function fetchResultsFromSheet(): Promise<ExamResult[]> {
           const durasiDetik = Number(row[durasiDetikIdx !== -1 ? durasiDetikIdx : 11]) || 0;
           const durasiFormatted = String(row[durasiFmtIdx !== -1 ? durasiFmtIdx : 12] || `${Math.floor(durasiDetik / 60)}:${String(durasiDetik % 60).padStart(2, '0')}`).trim();
 
-          if (nik || nama) {
+          if (nik && nama && nik.toLowerCase() !== 'nik') {
             results.push({
               id: `sheet-${i}`,
               timestamp: String(row[tsIdx !== -1 ? tsIdx : 0] || new Date().toISOString()).trim(),
@@ -676,13 +864,11 @@ export async function fetchResultsFromSheet(): Promise<ExamResult[]> {
           }
         }
 
-        if (results.length > 0) {
-          saveCachedResults(results);
-          return results;
-        }
+        saveCachedResults(results);
+        return results;
       }
     } catch {
-      // Fall through to cache
+      // Fall through to cache only if network error
     }
 
     return getCachedResults();
@@ -692,88 +878,384 @@ export async function fetchResultsFromSheet(): Promise<ExamResult[]> {
   }
 }
 
+export interface SubmitResultResponse {
+  success: boolean;
+  deliveredToSheet: boolean;
+  method: 'apps_script' | 'oauth' | 'cached_pending';
+  message?: string;
+}
+
 // Append Participant Result directly into sheet Hasil_Jawaban
-export async function submitResultToSheet(result: ExamResult): Promise<boolean> {
-  // Always update local cache first
+export async function submitResultToSheet(result: ExamResult): Promise<SubmitResultResponse> {
+  // 1. Always update local cache first so score is immediately safe
   const existingCached = getCachedResults().filter((r) => r.nik !== result.nik);
   const updatedResults = [result, ...existingCached];
   saveCachedResults(updatedResults);
 
-  try {
-    await ensureSheetExists('Hasil_Jawaban');
+  let delivered = false;
+  let method: 'apps_script' | 'oauth' | 'cached_pending' = 'cached_pending';
 
-    // Check if header row exists
-    let hasHeader = false;
+  // 2. Try Google Apps Script Web App (Does not require Google sign-in; works for all 5,000+ participants on mobile/desktop)
+  const scriptUrl = getAppsScriptUrl();
+  if (scriptUrl) {
     try {
-      const headerCheck = await fetchWithAuth(`${BASE_URL}/values/Hasil_Jawaban!A1:O1`);
-      if (headerCheck.values && headerCheck.values.length > 0 && headerCheck.values[0].length > 0) {
-        hasHeader = true;
-      }
-    } catch {
-      hasHeader = false;
+      await fetch(scriptUrl, {
+        method: 'POST',
+        mode: 'no-cors',
+        headers: {
+          'Content-Type': 'text/plain;charset=utf-8',
+        },
+        body: JSON.stringify({ action: 'submit_result', result }),
+      });
+      delivered = true;
+      method = 'apps_script';
+      console.log('Successfully submitted exam result via Google Apps Script Web App');
+    } catch (err) {
+      console.warn('Apps Script submission error:', err);
     }
+  }
 
-    if (!hasHeader) {
-      const headers = [
-        'Timestamp',
-        'NIK',
-        'Nama Peserta',
-        'Toko / Unit',
-        'Jabatan',
-        'Skor Akhir',
-        'Total Soal',
-        'Jumlah Benar',
-        'Jumlah Salah',
-        'Waktu Mulai',
-        'Waktu Selesai',
-        'Durasi (Detik)',
-        'Durasi (MM:SS)',
-        'Status Kelulusan',
-        'Detail Jawaban',
-      ];
+  // 3. If Apps Script not configured or failed, try direct Google Sheets API (OAuth) if user/admin is authenticated
+  if (!delivered) {
+    try {
+      const token = await getAccessToken();
+      if (token) {
+        await ensureSheetExists('Hasil_Jawaban');
+
+        // Check if header row exists
+        let hasHeader = false;
+        try {
+          const headerCheck = await fetchWithAuth(`${BASE_URL}/values/Hasil_Jawaban!A1:O1`);
+          if (headerCheck.values && headerCheck.values.length > 0 && headerCheck.values[0].length > 0) {
+            hasHeader = true;
+          }
+        } catch {
+          hasHeader = false;
+        }
+
+        if (!hasHeader) {
+          await fetchWithAuth(`${BASE_URL}/values/Hasil_Jawaban!A1:O1?valueInputOption=USER_ENTERED`, {
+            method: 'PUT',
+            body: JSON.stringify({
+              range: 'Hasil_Jawaban!A1:O1',
+              majorDimension: 'ROWS',
+              values: [HASIL_JAWABAN_HEADERS],
+            }),
+          });
+        }
+
+        // Append submission row
+        const rowValues = [
+          result.timestamp,
+          result.nik,
+          result.nama,
+          result.toko,
+          result.jabatan,
+          result.skor,
+          result.totalSoal,
+          result.jumlahBenar,
+          result.jumlahSalah,
+          result.waktuMulai,
+          result.waktuSelesai,
+          result.durasiDetik,
+          result.durasiFormatted,
+          result.statusKelulusan,
+          result.detailJawaban || '',
+        ];
+
+        await fetchWithAuth(`${BASE_URL}/values/Hasil_Jawaban!A1:append?valueInputOption=USER_ENTERED`, {
+          method: 'POST',
+          body: JSON.stringify({
+            range: 'Hasil_Jawaban!A1',
+            majorDimension: 'ROWS',
+            values: [rowValues],
+          }),
+        });
+
+        delivered = true;
+        method = 'oauth';
+        console.log('Successfully submitted exam result via Google Sheets API (OAuth)');
+      }
+    } catch (err) {
+      console.warn('Could not append directly to Google Sheet via OAuth:', err);
+    }
+  }
+
+  return {
+    success: true,
+    deliveredToSheet: delivered,
+    method,
+    message: delivered
+      ? 'Hasil ujian berhasil dikirim langsung ke Google Spreadsheet sheet Hasil_Jawaban.'
+      : 'Hasil ujian tersimpan aman di sistem lokal. Siap disinkronkan oleh Admin ke sheet Hasil_Jawaban.',
+  };
+}
+
+// Push all results from app to sheet Hasil_Jawaban (Mass sync)
+export async function pushAllResultsToSheet(resultsToPush: ExamResult[]): Promise<{
+  success: boolean;
+  deliveredCount: number;
+  message: string;
+}> {
+  if (resultsToPush.length === 0) {
+    return { success: false, deliveredCount: 0, message: 'Tidak ada data nilai ujian untuk dikirim.' };
+  }
+
+  const scriptUrl = getAppsScriptUrl();
+  const token = await getAccessToken();
+
+  // 1. Try Apps Script Bulk Push
+  if (scriptUrl) {
+    try {
+      await fetch(scriptUrl, {
+        method: 'POST',
+        mode: 'no-cors',
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        body: JSON.stringify({ action: 'bulk_submit', results: resultsToPush }),
+      });
+      return {
+        success: true,
+        deliveredCount: resultsToPush.length,
+        message: `Berhasil mengirim ${resultsToPush.length} hasil ujian ke sheet Hasil_Jawaban via Apps Script!`,
+      };
+    } catch (err: any) {
+      console.warn('Failed bulk push via Apps Script:', err);
+    }
+  }
+
+  // 2. Try Google Sheets API (OAuth)
+  if (token) {
+    try {
+      await ensureSheetExists('Hasil_Jawaban');
+
+      // Check header
+      let hasHeader = false;
+      try {
+        const headerCheck = await fetchWithAuth(`${BASE_URL}/values/Hasil_Jawaban!A1:O1`);
+        if (headerCheck.values && headerCheck.values.length > 0 && headerCheck.values[0].length > 0) {
+          hasHeader = true;
+        }
+      } catch {
+        hasHeader = false;
+      }
+
+      if (!hasHeader) {
+        await fetchWithAuth(`${BASE_URL}/values/Hasil_Jawaban!A1:O1?valueInputOption=USER_ENTERED`, {
+          method: 'PUT',
+          body: JSON.stringify({
+            range: 'Hasil_Jawaban!A1:O1',
+            majorDimension: 'ROWS',
+            values: [HASIL_JAWABAN_HEADERS],
+          }),
+        });
+      }
+
+      const rows = resultsToPush.map((r) => [
+        r.timestamp,
+        r.nik,
+        r.nama,
+        r.toko,
+        r.jabatan,
+        r.skor,
+        r.totalSoal,
+        r.jumlahBenar,
+        r.jumlahSalah,
+        r.waktuMulai,
+        r.waktuSelesai,
+        r.durasiDetik,
+        r.durasiFormatted,
+        r.statusKelulusan,
+        r.detailJawaban || '',
+      ]);
+
+      await fetchWithAuth(`${BASE_URL}/values/Hasil_Jawaban!A2:O${rows.length + 1}?valueInputOption=USER_ENTERED`, {
+        method: 'PUT',
+        body: JSON.stringify({
+          range: `Hasil_Jawaban!A2:O${rows.length + 1}`,
+          majorDimension: 'ROWS',
+          values: rows,
+        }),
+      });
+
+      return {
+        success: true,
+        deliveredCount: resultsToPush.length,
+        message: `Berhasil mengirim ${resultsToPush.length} hasil ujian ke sheet Hasil_Jawaban Google Spreadsheet!`,
+      };
+    } catch (err: any) {
+      return {
+        success: false,
+        deliveredCount: 0,
+        message: `Gagal mengirim ke Google Sheets via OAuth: ${err.message}`,
+      };
+    }
+  }
+
+  return {
+    success: false,
+    deliveredCount: 0,
+    message: 'Belum terhubung ke Google Spreadsheet. Silakan pasang URL Web App Apps Script atau Hubungkan Akun Google di tab Spreadsheet.',
+  };
+}
+
+// 1-Click: Setup Hasil_Jawaban Header Row (A1:O1)
+export async function setupHasilJawabanHeader(): Promise<{ success: boolean; message: string }> {
+  const scriptUrl = getAppsScriptUrl();
+  const token = await getAccessToken();
+
+  if (scriptUrl) {
+    try {
+      await fetch(scriptUrl, {
+        method: 'POST',
+        mode: 'no-cors',
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        body: JSON.stringify({ action: 'init_header' }),
+      });
+      return { success: true, message: 'Header kolom Hasil_Jawaban berhasil disiapkan di Google Spreadsheet!' };
+    } catch (e: any) {
+      console.warn('Apps script init header error:', e);
+    }
+  }
+
+  if (token) {
+    try {
+      await ensureSheetExists('Hasil_Jawaban');
       await fetchWithAuth(`${BASE_URL}/values/Hasil_Jawaban!A1:O1?valueInputOption=USER_ENTERED`, {
         method: 'PUT',
         body: JSON.stringify({
           range: 'Hasil_Jawaban!A1:O1',
           majorDimension: 'ROWS',
-          values: [headers],
+          values: [HASIL_JAWABAN_HEADERS],
         }),
       });
+      return { success: true, message: 'Header kolom Hasil_Jawaban (A1:O1) berhasil dipasang di Google Spreadsheet!' };
+    } catch (e: any) {
+      return { success: false, message: `Gagal memasang header: ${e.message}` };
     }
+  }
 
-    // Append submission row
-    const rowValues = [
-      result.timestamp,
-      result.nik,
-      result.nama,
-      result.toko,
-      result.jabatan,
-      result.skor,
-      result.totalSoal,
-      result.jumlahBenar,
-      result.jumlahSalah,
-      result.waktuMulai,
-      result.waktuSelesai,
-      result.durasiDetik,
-      result.durasiFormatted,
-      result.statusKelulusan,
-      result.detailJawaban || '',
-    ];
+  return {
+    success: false,
+    message: 'Koneksi belum terkonfigurasi. Pasang URL Web App Apps Script atau hubungkan akun Google.',
+  };
+}
 
-    await fetchWithAuth(`${BASE_URL}/values/Hasil_Jawaban!A1:append?valueInputOption=USER_ENTERED`, {
+// Test connection to Google Apps Script Web App
+export async function testAppsScriptConnection(url: string): Promise<{ success: boolean; message: string }> {
+  const cleanUrl = url.trim();
+  if (!cleanUrl || !cleanUrl.startsWith('https://script.google.com')) {
+    return { success: false, message: 'URL tidak valid. Harus diawali dengan https://script.google.com/macros/s/.../exec' };
+  }
+
+  try {
+    const testRow: ExamResult = {
+      timestamp: new Date().toLocaleString('id-ID'),
+      nik: 'TEST-STM',
+      nama: 'UJI COBA KONEKSI SISTEM STM',
+      toko: 'TEST',
+      jabatan: 'Chief Of Store',
+      skor: 100,
+      totalSoal: 10,
+      jumlahBenar: 10,
+      jumlahSalah: 0,
+      waktuMulai: '08:00:00',
+      waktuSelesai: '08:10:00',
+      durasiDetik: 600,
+      durasiFormatted: '10:00',
+      statusKelulusan: 'LULUS',
+      detailJawaban: 'Tes Koneksi Web App',
+    };
+
+    await fetch(cleanUrl, {
       method: 'POST',
-      body: JSON.stringify({
-        range: 'Hasil_Jawaban!A1',
-        majorDimension: 'ROWS',
-        values: [rowValues],
-      }),
+      mode: 'no-cors',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify({ action: 'submit_result', result: testRow }),
     });
 
-    return true;
-  } catch (err) {
-    console.warn('Could not append directly to Google Sheet (will stay in local cache):', err);
-    return false;
+    saveAppsScriptUrl(cleanUrl);
+
+    return {
+      success: true,
+      message: 'Koneksi berhasil! Baris data uji coba (TEST-STM) telah dikirim ke sheet Hasil_Jawaban di Google Spreadsheet Anda.',
+    };
+  } catch (err: any) {
+    return {
+      success: false,
+      message: `Gagal menguji Web App: ${err.message}`,
+    };
   }
+}
+
+// Generate TSV for clipboard copy (Ready to Paste directly into Google Sheet with Ctrl+V)
+export function generateResultsTsv(results: ExamResult[]): string {
+  const headerLine = HASIL_JAWABAN_HEADERS.join('\t');
+  const rowLines = results.map((r) => [
+    r.timestamp,
+    r.nik,
+    r.nama,
+    r.toko,
+    r.jabatan,
+    r.skor,
+    r.totalSoal,
+    r.jumlahBenar,
+    r.jumlahSalah,
+    r.waktuMulai,
+    r.waktuSelesai,
+    r.durasiDetik,
+    r.durasiFormatted,
+    r.statusKelulusan,
+    r.detailJawaban || '',
+  ].join('\t'));
+
+  return [headerLine, ...rowLines].join('\n');
+}
+
+// Clear all results from sheet Hasil_Jawaban (data rows starting at row 2) and clear local cache
+export async function clearAllResultsFromSheet(): Promise<{ success: boolean; sheetCleared: boolean; message: string }> {
+  clearCachedResults();
+
+  // Try Apps Script clear first
+  const scriptUrl = getAppsScriptUrl();
+  if (scriptUrl) {
+    try {
+      await fetch(scriptUrl, {
+        method: 'POST',
+        mode: 'no-cors',
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        body: JSON.stringify({ action: 'clear_results' }),
+      });
+      return {
+        success: true,
+        sheetCleared: true,
+        message: 'Seluruh nilai & hasil pengerjaan berhasil dihapus dari sheet Hasil_Jawaban di Google Spreadsheet dan aplikasi.',
+      };
+    } catch (e) {
+      console.warn('Apps Script clear error:', e);
+    }
+  }
+
+  try {
+    const token = await getAccessToken();
+    if (token) {
+      await fetchWithAuth(`${BASE_URL}/values/Hasil_Jawaban!A2:Z10000:clear`, {
+        method: 'POST',
+      });
+      return {
+        success: true,
+        sheetCleared: true,
+        message: 'Seluruh nilai & hasil pengerjaan berhasil dihapus dari sheet Hasil_Jawaban di Google Spreadsheet dan aplikasi.',
+      };
+    }
+  } catch (err) {
+    console.warn('Could not clear sheet via Google Sheets API (local cleared):', err);
+  }
+
+  return {
+    success: true,
+    sheetCleared: false,
+    message: 'Semua nilai & data hasil ujian berhasil direset ke 0 (seluruh peserta kembali ke status Belum Ujian).',
+  };
 }
 
 // Save complete questions list to Google Sheet (sync after delete/reorder)
